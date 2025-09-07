@@ -11,78 +11,127 @@ function getFfmpegPath() {
 }
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
-// Escape untuk drawtext
+// ----- util escape drawtext -----
 function escTextForDrawtext(s) {
+  // dukung newline untuk multi-line
   return String(s)
-    .replace(/\\/g, '\\\\')   // backslash -> \\
-    .replace(/:/g, '\\:')     // colon -> \:
-    .replace(/'/g, "\\'");    // single quote -> \'
+    .replace(/\\/g, '\\\\')   // \  -> \\
+    .replace(/:/g, '\\:')     // :  -> \:
+    .replace(/'/g, "\\'")     // '  -> \'
+    .replace(/\n/g, '\\n');   // newline
 }
-// Path font: ubah backslash ke forward slash + escape colon
-function escFontPath(p) {
-  return p.replace(/\\/g, '/').replace(/:/g, '\\:');
-}
+function escFontPath(p) { return p.replace(/\\/g, '/').replace(/:/g, '\\:'); }
 
-// Cari font yang ada di sistem (atau pakai font proyek)
+// ----- pilih font -----
 function findFont() {
   const candidates = [
+    path.join(__dirname, '..', 'assets', 'Roboto-Regular.ttf'), // kalau kamu punya
+    'C:/Windows/Fonts/Roboto-Regular.ttf',
+    'C:/Windows/Fonts/segoeui.ttf',
     'C:/Windows/Fonts/arial.ttf',
-    'C:/Windows/Fonts/ARIAL.TTF',
-    path.join(__dirname, '..', 'assets', 'NotoSans-Regular.ttf'), // kalau kamu taruh font sendiri di ./assets/
+    '/usr/share/fonts/truetype/roboto/Roboto-Regular.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
   ];
   return candidates.find(p => fs.existsSync(p)) || null;
 }
 
-async function makeBratVideo(sock, sender, text) {
+// ----- wrapping sederhana: jaga agar tiap baris <= maxChars -----
+function wrapText(text, maxChars) {
+  const words = String(text).trim().replace(/\s+/g, ' ').split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (test.length <= maxChars) line = test;
+    else { if (line) lines.push(line); line = w.length > maxChars ? w : w; }
+    // kalau satu kata sangat panjang, potong keras
+    while (line.length > maxChars) {
+      lines.push(line.slice(0, maxChars));
+      line = line.slice(maxChars);
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join('\n');
+}
+
+async function makeBratVideo(sock, sender, rawText) {
   const outDir = path.join(__dirname, '..', 'temp');
   ensureDir(outDir);
-  const outPath = path.join(outDir, `brat_${Date.now()}.mp4`);
 
-  const fontPath = findFont(); // bisa null
-  const safeText = escTextForDrawtext(text);
+  // 512x512, durasi & fps
+  const SIZE = '512x512';
+  const FPS  = 20;
+  const DURATION = 2.8; // detik
+
+  // hitung panjang baris → tentukan font-size
+  const maxChars = 13;                            // target per baris
+  const wrapped = wrapText(rawText, maxChars);    // ubah jadi multi-line dengan \n
+  const lines = wrapped.split('\n');
+  const longest = Math.max(...lines.map(l => l.length), 1);
+  // font adaptif: makin panjang, makin kecil
+  let fontSize = Math.max(28, Math.min(112, Math.floor(460 / Math.max(longest, 6))));
+  // kalau baris banyak, kecilkan lagi
+  if (lines.length >= 4) fontSize = Math.max(24, Math.floor(fontSize * 0.9));
+  if (lines.length >= 6) fontSize = Math.max(22, Math.floor(fontSize * 0.85));
+
+  // spacing antar baris (px)
+  const lineSpacing = Math.round(fontSize * 0.08);  // rapat, mirip brat
+  const leftPad = 26;                                // padding kiri
+  const topPad  = 26 + Math.round(fontSize * 0.7);   // start Y sedikit turun
+
+  const safeText = escTextForDrawtext(wrapped);
+  const fontPath = findFont();
+
+  // bangun filter drawtext (animasi X sinus kecil)
   const drawOpts = [];
-
-  if (fontPath) {
-    drawOpts.push(`fontfile='${escFontPath(fontPath)}'`);
-  } else {
-    // fallback: beri nama font (tidak selalu berhasil di Windows, tapi dicoba)
-    drawOpts.push(`font='Arial'`);
-  }
+  if (fontPath) drawOpts.push(`fontfile='${escFontPath(fontPath)}'`);
+  else          drawOpts.push(`font='Arial'`);
 
   drawOpts.push(
     `text='${safeText}'`,
-    `x=(w/2-tw/2)+80*sin(t*2)`,
-    `y=(h/2-th/2)`,
-    `fontsize=64`,
-    `fontcolor=white`,
-    `shadowx=2`,
-    `shadowy=2`
+    // geser kiri-kanan 10px dengan kecepatan sedang
+    `x=${leftPad}+10*sin(2*PI*t*0.8)`,
+    `y=${topPad}`,
+    `fontsize=${fontSize}`,
+    `fontcolor=black`,
+    `line_spacing=${lineSpacing}`,
+    `enable='between(t,0,${DURATION})'`
   );
-
   const draw = `drawtext=${drawOpts.join(':')}`;
+
+  // output WEBP animasi (stiker)
+  const outWebp = path.join(outDir, `brat_${Date.now()}.webp`);
 
   const cmd = getFfmpegPath();
   const args = [
     '-hide_banner',
-    '-f','lavfi','-i','color=c=#111111:s=720x720:r=30',
-    '-t','3',
+    // sumber kanvas putih
+    '-f', 'lavfi', '-r', String(FPS), '-i', `color=c=white:s=${SIZE}`,
+    // filter: gambar + teks
+    '-t', String(DURATION),
     '-vf', draw,
-    '-c:v','libx264','-preset','ultrafast','-crf','23',
-    '-pix_fmt','yuv420p',
-    outPath
+    // webp anim
+    '-an', '-vsync', '0',
+    '-vcodec', 'libwebp',
+    '-lossless', '0',
+    '-q:v', '70',          // kualitas (50–80 makin kecil makin tajam)
+    '-preset', 'default',
+    '-loop', '0',          // 0 = loop selamanya
+    outWebp
   ];
 
   await new Promise((resolve, reject) => {
     let err = '';
     const p = spawn(cmd, args, { shell: false });
     p.stderr.on('data', d => err += d.toString());
-    p.on('error', e => reject(e));
+    p.on('error', reject);
     p.on('close', code => code === 0 ? resolve() : reject(new Error(err || `ffmpeg exited ${code}`)));
   });
 
-  await sock.sendMessage(sender, { video: fs.readFileSync(outPath), caption: '🎬 Brat Video' });
-  try { fs.unlinkSync(outPath); } catch {}
+  // kirim sebagai stiker animasi
+  await sock.sendMessage(sender, { sticker: fs.readFileSync(outWebp) });
+
+  try { fs.unlinkSync(outWebp); } catch {}
 }
 
 module.exports = { makeBratVideo };
