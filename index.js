@@ -92,13 +92,15 @@ async function createStickerBaileys(sock, sender, msg) {
       console.log('❌ Buffer kosong / unduh gagal.');
       return sock.sendMessage(sender, { text: '⚠️ Gagal mengunduh gambar.' });
     }
+
     const mime = msg.message?.imageMessage?.mimetype || '';
     const allowed = ['image/jpeg','image/png','image/webp','image/heic','image/avif'];
     if (!allowed.some(m => mime.includes(m.split('/')[1]))) {
       console.log('ℹ️ Mimetype tak lazim, coba decode:', mime);
     }
 
-    const stickerBuffer = await sharp(buffer, { failOn: false })
+    // 👇 perbaikan di sini: failOn: 'none'
+    const stickerBuffer = await sharp(buffer, { failOn: 'none' })
       .resize(512, 512, { fit: 'contain', background: { r:0, g:0, b:0, alpha:0 } })
       .webp({ quality: 95 })
       .toBuffer();
