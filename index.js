@@ -24,45 +24,50 @@ function startTyping(sock, jid) {
   return () => { stopped = true; sock.sendPresenceUpdate('paused', jid).catch(()=>{}); };
 }
 
-// ===== spinner helper (pesan beranimasi ◐◓◑◒ sampai stop) =====
-async function startSpinner(sock, jid, label = 'Loading…') {
-  const frames = ['◐','◓','◑','◒'];
-  let fi = 0;
-  let currentLabel = label;
+// ===== progress bar helper (■ □) =====
+// - kirim pesan dengan bar 0%
+// - .to(%) -> geser target; bar akan nyusul pelan (smooth)
+// - .stop(text) -> set 100% & final label
+function formatBar(pct, width = 10) {
+  const filled = Math.round((pct / 100) * width);
+  const empty = Math.max(0, width - filled);
+  return `【${'■'.repeat(filled)}${'□'.repeat(empty)}】 ${String(Math.round(pct)).padStart(3, ' ')}%`;
+}
+async function startProgressBar(sock, jid, label = 'Memproses…') {
+  let current = 0;
+  let target = 0;
   let stopped = false;
 
-  const sent = await sock.sendMessage(jid, { text: `${frames[fi]} ${currentLabel}` });
+  const sent = await sock.sendMessage(jid, { text: `${label}\n${formatBar(0)}` });
   const key = sent.key;
 
-  // update frame setiap 900ms (aman biar gak ke-rate limit)
+  // animator: tiap 700ms geser current mendekati target (step kecil biar halus)
   const timer = setInterval(async () => {
     if (stopped) return;
-    fi = (fi + 1) % frames.length;
-    try {
-      await sock.sendMessage(jid, { text: `${frames[fi]} ${currentLabel}`, edit: key });
-    } catch {
-      // kalau edit gagal (mis. pesan kedaluwarsa), kirim pesan baru & ganti key
-      try {
-        const s2 = await sock.sendMessage(jid, { text: `${frames[fi]} ${currentLabel}` });
-        key.id = s2.key.id;
-      } catch {}
+    if (current < target) {
+      const diff = target - current;
+      const step = Math.min(5, Math.max(1, diff / 6)); // step adaptif
+      current = Math.min(100, current + step);
+      try { await sock.sendMessage(jid, { text: `${label}\n${formatBar(current)}`, edit: key }); } catch {}
     }
-  }, 900);
+  }, 700);
 
-  async function set(text) {
-    currentLabel = text || currentLabel;
-    try { await sock.sendMessage(jid, { text: `${frames[fi]} ${currentLabel}`, edit: key }); } catch {}
+  async function to(pct, newLabel) {
+    target = Math.max(0, Math.min(100, pct));
+    if (newLabel) {
+      label = newLabel;
+      try { await sock.sendMessage(jid, { text: `${label}\n${formatBar(current)}`, edit: key }); } catch {}
+    }
   }
-
-  async function stop(finalText) {
+  async function stop(finalText = '✅ Selesai') {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
-    try { await sock.sendMessage(jid, { text: finalText || '✅ Selesai', edit: key }); }
-    catch { await sock.sendMessage(jid, { text: finalText || '✅ Selesai' }); }
+    current = 100; target = 100;
+    try { await sock.sendMessage(jid, { text: `${finalText}\n${formatBar(100)}`, edit: key }); }
+    catch { await sock.sendMessage(jid, { text: `${finalText}\n${formatBar(100)}` }); }
   }
-
-  return { set, stop, key };
+  return { to, stop, key };
 }
 
 async function startBot() {
@@ -81,8 +86,8 @@ async function startBot() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages?.[0];
     if (!msg?.message || !msg?.key?.remoteJid) return;
-    if (msg.key.fromMe) return;     // anti-echo
-    if (type !== 'notify') return;  // hanya pesan baru
+    if (msg.key.fromMe) return;
+    if (type !== 'notify') return;
 
     const sender = msg.key.remoteJid;
     const text =
@@ -95,118 +100,120 @@ async function startBot() {
     if (!text) return;
     console.log(`💬 Pesan dari ${sender}: ${text}`);
 
-    // ===== Menu & Info (cepat, tak perlu spinner) =====
+    // Menu & Info (tanpa progress)
     if (text === '.menu' || text === '.help') return sendMenu(sock, sender);
     if (text === '.info') return sendInfo(sock, sender);
 
-    // ===== TikTok =====
+    // TikTok
     if (text.startsWith('.tiktok ')) {
       const url = text.replace('.tiktok ', '').trim();
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Mengunduh TikTok…');
+      const bar = await startProgressBar(sock, sender, 'Mengunduh TikTok…');
       try {
+        await bar.to(10, 'Mengunduh TikTok…');
         if (url.includes('/photo/')) {
-          await spin.set('Mode foto TikTok…');
+          await bar.to(30, 'Mode foto TikTok…');
           await downloadPhoto(sock, sender, url, 'tiktok');
         } else {
-          await spin.set('Ambil metadata…');
+          await bar.to(35, 'Ambil metadata…');
           await downloadMedia(sock, sender, url, 'tiktok');
         }
-        await spin.stop('✅ TikTok terkirim.');
+        await bar.stop('✅ TikTok terkirim.');
       } catch (e) {
         console.error('TT error:', e?.message || e);
-        await spin.stop('⚠️ Gagal mengunduh TikTok.');
+        await bar.stop('⚠️ Gagal mengunduh TikTok.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Instagram =====
+    // Instagram
     if (text.startsWith('.ig ')) {
       const url = text.replace('.ig ', '').trim();
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Mengunduh Instagram…');
+      const bar = await startProgressBar(sock, sender, 'Mengunduh Instagram…');
       try {
+        await bar.to(10);
         if (url.includes('/p/') || url.includes('/reel/')) {
-          await spin.set('Ambil metadata…');
+          await bar.to(35, 'Ambil metadata…');
           await downloadMedia(sock, sender, url, 'instagram');
         } else {
-          await spin.set('Mode foto…');
+          await bar.to(30, 'Mode foto…');
           await downloadPhoto(sock, sender, url, 'instagram');
         }
-        await spin.stop('✅ Instagram terkirim.');
+        await bar.stop('✅ Instagram terkirim.');
       } catch (e) {
         console.error('IG error:', e?.message || e);
-        await spin.stop('⚠️ Gagal mengunduh Instagram.');
+        await bar.stop('⚠️ Gagal mengunduh Instagram.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== YouTube =====
+    // YouTube
     if (text.startsWith('.yt ')) {
       const url = text.replace('.yt ', '').trim();
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Mengunduh YouTube…');
+      const bar = await startProgressBar(sock, sender, 'Mengunduh YouTube…');
       try {
-        await spin.set('Ambil metadata…');
+        await bar.to(20, 'Ambil metadata…');
         await downloadMedia(sock, sender, url, 'youtube');
-        await spin.stop('✅ YouTube terkirim.');
+        await bar.stop('✅ YouTube terkirim.');
       } catch (e) {
         console.error('YT error:', e?.message || e);
-        await spin.stop('⚠️ Gagal mengunduh YouTube.');
+        await bar.stop('⚠️ Gagal mengunduh YouTube.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Stiker brat teks =====
+    // Stiker brat teks
     if (text.startsWith('.brat ')) {
       const stickerText = text.replace('.brat ', '').trim();
       if (!stickerText) return sock.sendMessage(sender, { text: '❌ Harap masukkan teks untuk stiker!' });
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Membuat stiker brat…');
+      const bar = await startProgressBar(sock, sender, 'Membuat stiker brat…');
       try {
-        await spin.set('Render teks…');
+        await bar.to(40, 'Render teks…');
         await sendBratSticker(sock, sender, stickerText);
-        await spin.stop('✅ Stiker brat terkirim.');
+        await bar.stop('✅ Stiker brat terkirim.');
       } catch (e) {
         console.error('BRAT error:', e?.message || e);
-        await spin.stop('⚠️ Gagal membuat stiker brat.');
+        await bar.stop('⚠️ Gagal membuat stiker brat.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Brat Video =====
+    // Brat Video
     if (text.startsWith('.bratvideo ')) {
       const vt = text.replace('.bratvideo ', '').trim();
       if (!vt) return sock.sendMessage(sender, { text: '❌ Format: .bratvideo <teks>' });
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Membuat brat video…');
+      const bar = await startProgressBar(sock, sender, 'Membuat brat video…');
       try {
-        await spin.set('Render video…');
+        await bar.to(35, 'Render video…');
         await makeBratVideo(sock, sender, vt);
-        await spin.stop('✅ Video brat terkirim.');
+        await bar.stop('✅ Video brat terkirim.');
       } catch (e) {
         console.error('bratvideo fail:', e?.message || e);
-        await spin.stop('⚠️ Gagal membuat brat video. Pastikan ffmpeg terpasang.');
+        await bar.stop('⚠️ Gagal membuat brat video. Pastikan ffmpeg terpasang.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Auto stiker dari gambar =====
+    // Auto stiker dari gambar
     if (msg.message.imageMessage) {
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, 'Mengonversi gambar ke stiker…');
+      const bar = await startProgressBar(sock, sender, 'Mengonversi gambar ke stiker…');
       try {
-        await spin.set('Resize & convert…');
+        await bar.to(50, 'Resize & convert…');
         await createStickerBaileys(sock, sender, msg);
-        await spin.stop('✅ Stiker terkirim.');
+        await bar.stop('✅ Stiker terkirim.');
       } catch (e) {
         console.error('sticker error:', e?.message || e);
-        await spin.stop('⚠️ Gagal membuat stiker.');
+        await bar.stop('⚠️ Gagal membuat stiker.');
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Pinterest =====
+    // Pinterest
     if (text.startsWith('.pin ')) {
       const raw = text.replace('.pin ', '').trim();
       let count = 3; let query = raw;
@@ -215,22 +222,26 @@ async function startBot() {
       if (!query) return sock.sendMessage(sender, { text: '❌ Format: .pin <kata kunci> [jumlah]\ncontoh: .pin hiu 3' });
 
       const stopTyping = startTyping(sock, sender);
-      const spin = await startSpinner(sock, sender, `Cari Pinterest: ${query}…`);
+      const bar = await startProgressBar(sock, sender, `Cari Pinterest: ${query}…`);
       try {
-        await spin.set('Cari via DuckDuckGo…');
+        await bar.to(20, 'Cari via DuckDuckGo…');
         await sendPinterestImages(sock, sender, query, count, async (stage, i, total) => {
-          if (stage === 'search-bing') await spin.set('DuckDuckGo gagal, fallback Bing…');
-          if (stage === 'download') await spin.set(`Unduh gambar ${i}/${total}…`);
+          if (stage === 'search-bing') await bar.to(30, 'DuckDuckGo gagal, fallback Bing…');
+          if (stage === 'download') {
+            // 30 → 95% selama unduh
+            const pct = 30 + Math.round((i / total) * 65);
+            await bar.to(pct, `Unduh gambar ${i}/${total}…`);
+          }
         });
-        await spin.stop(`✅ Selesai kirim ${query}.`);
+        await bar.stop(`✅ Selesai kirim ${query}.`);
       } catch (e) {
         console.error('PIN error:', e?.message || e);
-        await spin.stop(`⚠️ Gagal ambil gambar untuk ${query}.`);
+        await bar.stop(`⚠️ Gagal ambil gambar untuk ${query}.`);
       } finally { stopTyping(); }
       return;
     }
 
-    // ===== Command custom =====
+    // Command custom
     if (text.trim().startsWith('.')) {
       const args = text.slice(1).split(' ');
       const command = (args.shift() || '').toLowerCase();
@@ -245,7 +256,7 @@ async function startBot() {
       return;
     }
 
-    // ===== Auto-response fallback =====
+    // Auto-response fallback
     const autoResponse = await responseHandler(text);
     if (autoResponse) await sock.sendMessage(sender, { text: autoResponse });
   });
