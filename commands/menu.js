@@ -6,6 +6,7 @@ async function sendMenu(sock, sender) {
 ├≽️ *.ig [url]* — Unduh Instagram
 ├≽️ *.yt [url]* — Unduh YouTube
 ├≽️ *.brat [teks]* — Stiker teks
+├≽️ *.bratvideo [teks]* — Video teks
 ├≽️ *.pin <query> [jumlah]* — Gambar Pinterest
 ╰═══════════════`;
   await sock.sendMessage(sender, { text: menuText });
