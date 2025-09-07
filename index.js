@@ -6,11 +6,11 @@ const sharp = require('sharp');
 const { sendMenu } = require('./commands/menu');
 const { sendInfo } = require('./commands/info');
 const { downloadMedia, downloadPhoto } = require('./commands/download');
-const commandHandler = require('./handlers/commandHandler'); // pakai punyamu
+const commandHandler = require('./handlers/commandHandler');
 const responseHandler = require('./handlers/response');
 const { sendPinterestImages } = require('./commands/pinterest');
 const { makeBratVideo } = require('./commands/bratvideo');
-import { sendTextSticker } from './commands/brat.js';
+const { sendTextSticker: sendBratSticker } = require('./commands/brat'); // brat teks ala kiri
 
 // ===== Simple progress (edit pesan) =====
 function startTyping(sock, jid) {
@@ -49,8 +49,8 @@ async function startBot() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages?.[0];
     if (!msg?.message || !msg?.key?.remoteJid) return;
-    if (msg.key.fromMe) return;     // anti-echo
-    if (type !== 'notify') return;  // hanya pesan baru
+    if (msg.key.fromMe) return;
+    if (type !== 'notify') return;
 
     const sender = msg.key.remoteJid;
     const text =
@@ -71,7 +71,6 @@ async function startBot() {
     if (text.startsWith('.tiktok ')) {
       const url = text.replace('.tiktok ', '').trim();
       if (url.includes('/photo/')) return downloadPhoto(sock, sender, url, 'tiktok');
-
       const stop = startTyping(sock, sender);
       const prog = await startProgressMessage(sock, sender, '⏳ Mengunduh dari TikTok…');
       try { await downloadMedia(sock, sender, url, 'tiktok'); await prog.update('✅ TikTok terkirim.'); }
@@ -105,28 +104,31 @@ async function startBot() {
       return;
     }
 
-    // ===== Stiker teks (.brat <teks>) =====
+    // ===== Stiker brat teks (.brat <teks>) =====
     if (text.startsWith('.brat ')) {
-    const stickerText = text.replace('.brat ', '').trim();
-    if (!stickerText) return sock.sendMessage(sender, { text: '❌ Harap masukkan teks untuk stiker!' });
-    // progress milikmu sendiri tetap boleh dipakai
-    await sendTextSticker(sock, sender, stickerText);
-    return;
+      const stickerText = text.replace('.brat ', '').trim();
+      if (!stickerText) return sock.sendMessage(sender, { text: '❌ Harap masukkan teks untuk stiker!' });
+      const stop = startTyping(sock, sender);
+      const prog = await startProgressMessage(sock, sender, '⏳ Membuat stiker brat…');
+      try { await sendBratSticker(sock, sender, stickerText); await prog.update('✅ Stiker brat terkirim.'); }
+      catch { await prog.update('⚠️ Gagal membuat stiker brat.'); }
+      finally { stop(); }
+      return;
     }
 
-    // ===== Brat Video (.bratvideo <teks>) =====
+    // ===== Brat Video =====
     if (text.startsWith('.bratvideo ')) {
       const vt = text.replace('.bratvideo ', '').trim();
       if (!vt) return sock.sendMessage(sender, { text: '❌ Format: .bratvideo <teks>' });
       const stop = startTyping(sock, sender);
       const prog = await startProgressMessage(sock, sender, '⏳ Membuat brat video…');
-      try { await makeBratVideo(sock, sender, vt); await prog.update('✅ Video terkirim.'); }
-      catch (e) { console.error('bratvideo fail:', e?.message || e); await prog.update('⚠️ Gagal membuat brat video. Pastikan ffmpeg ada.'); }
+      try { await makeBratVideo(sock, sender, vt); await prog.update('✅ Video brat terkirim.'); }
+      catch (e) { console.error('bratvideo fail:', e?.message || e); await prog.update('⚠️ Gagal membuat brat video.'); }
       finally { stop(); }
       return;
     }
 
-    // ===== Jika ada gambar → auto stiker =====
+    // ===== Auto stiker dari gambar =====
     if (msg.message.imageMessage) {
       const stop = startTyping(sock, sender);
       const prog = await startProgressMessage(sock, sender, '⏳ Mengonversi gambar ke stiker…');
@@ -136,29 +138,28 @@ async function startBot() {
       return;
     }
 
-    // ===== Pinterest (.pin <query> [jumlah]) =====
+    // ===== Pinterest =====
     if (text.startsWith('.pin ')) {
       const raw = text.replace('.pin ', '').trim();
       let count = 3; let query = raw;
       const maybeNum = raw.split(' ').pop();
       if (/^\d+$/.test(maybeNum)) { count = Math.min(Math.max(parseInt(maybeNum, 10), 1), 10); query = raw.replace(/\s+\d+$/, '').trim(); }
-      if (!query) return sock.sendMessage(sender, { text: '❌ Format: .pin <kata kunci> [jumlah]\ncontoh: .pin aesthetic car 5' });
+      if (!query) return sock.sendMessage(sender, { text: '❌ Format: .pin <kata kunci> [jumlah]' });
 
       const stop = startTyping(sock, sender);
-      const prog = await startProgressMessage(sock, sender, `🔎 Mencari gambar Pinterest untuk: *${query}* (0%)`);
+      const prog = await startProgressMessage(sock, sender, `🔎 Cari Pinterest: *${query}*`);
       try {
-        await prog.update(`🛰️ Cari via DuckDuckGo… (20%)`);
         await sendPinterestImages(sock, sender, query, count, async (stage, i, total) => {
-          if (stage === 'search-bing') await prog.update('🛰️ DDG gagal, fallback Bing… (30%)');
-          if (stage === 'download') await prog.update(`⬇️ Unduh gambar ${i}/${total}… (${30 + Math.min(60, Math.round((i/total)*60))}%)`);
+          if (stage === 'search-bing') await prog.update('🛰️ DDG gagal, fallback Bing…');
+          if (stage === 'download') await prog.update(`⬇️ Unduh gambar ${i}/${total}…`);
         });
-        await prog.update(`✅ Selesai kirim hasil *${query}*. (100%)`);
-      } catch { await prog.update(`⚠️ Gagal mengambil gambar untuk *${query}*.`); }
+        await prog.update(`✅ Selesai kirim *${query}*.`);
+      } catch { await prog.update(`⚠️ Gagal ambil gambar untuk *${query}*.`); }
       finally { stop(); }
       return;
     }
 
-    // ===== Command custom (diawali titik) =====
+    // ===== Command custom =====
     if (text.trim().startsWith('.')) {
       const args = text.slice(1).split(' ');
       const command = (args.shift() || '').toLowerCase();
@@ -179,39 +180,18 @@ async function startBot() {
   });
 }
 
-// Stiker teks
-async function sendTextSticker(sock, sender, text) {
-  const width = 512, height = 512, outputPath = 'sticker.webp';
-  const svgImage = `
-  <svg width="${width}" height="${height}">
-    <rect width="100%" height="100%" fill="white"/>
-    <text x="50%" y="50%" font-size="60" text-anchor="middle" fill="black" dy=".3em">${text}</text>
-  </svg>`;
-  fs.writeFileSync('text.svg', svgImage);
-
-  await sharp('text.svg').resize(width, height).toFormat('webp').toFile(outputPath);
-  fs.unlinkSync('text.svg');
-
-  await sock.sendMessage(sender, { sticker: fs.readFileSync(outputPath) });
-  fs.unlinkSync(outputPath);
-}
-
-// Stiker dari gambar
+// Stiker dari gambar (biasa)
 async function createStickerBaileys(sock, sender, msg) {
   const buffer = await sock.downloadMediaMessage(msg);
-  if (!buffer) {
-    console.log('❌ Gagal mengunduh gambar.');
-    return sock.sendMessage(sender, { text: '⚠️ Gagal mengunduh gambar.' });
-  }
+  if (!buffer) return sock.sendMessage(sender, { text: '⚠️ Gagal unduh gambar.' });
   const media = msg.message.imageMessage;
-  if (!media || !['image/jpeg', 'image/png', 'image/webp'].includes(media.mimetype)) {
-    console.log('❌ Gambar bukan format yang valid.');
-    return sock.sendMessage(sender, { text: 'Mohon kirimkan gambar dalam format JPG, PNG, atau WEBP!' });
+  if (!media || !['image/jpeg','image/png','image/webp'].includes(media.mimetype)) {
+    return sock.sendMessage(sender, { text: 'Kirim gambar JPG/PNG/WEBP ya!' });
   }
   const stickerBuffer = await sharp(buffer)
-    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(512, 512, { fit: 'contain', background: { r:0,g:0,b:0,alpha:0 } })
     .toFormat('webp').toBuffer();
-
   await sock.sendMessage(sender, { sticker: stickerBuffer });
 }
+
 startBot();
