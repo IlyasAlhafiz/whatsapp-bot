@@ -1,14 +1,67 @@
+// commands/menu.js
 async function sendMenu(sock, sender) {
-  const menuText = `╭════•›「 *Menu Bot* 」
-├≽️ *.menu* / *.help* — Lihat menu
-├≽️ *.info* — Info bot
-├≽️ *.tiktok [url]* — Unduh TikTok
-├≽️ *.ig [url]* — Unduh Instagram
-├≽️ *.yt [url]* — Unduh YouTube
-├≽️ *.brat [teks]* — Stiker teks
-├≽️ *.bratvideo [teks]* — Video teks
-├≽️ *.pin <query> [jumlah]* — Gambar Pinterest
-╰═══════════════`;
-  await sock.sendMessage(sender, { text: menuText });
+  const menu = [
+    "╭─────────────────────────",
+    "│   🌟  *BOT MENU* (v1)  ",
+    "├─────────────────────────",
+    "│ Prefix: `.`   • Contoh: `.tiktok <url>`",
+    "│ Gunakan huruf kecil semua.",
+    "├─────────────────────────",
+    "│ 🧭  *Dasar*",
+    "│  • `.menu` / `.help`   — Lihat menu",
+    "│  • `.info`             — Info bot",
+    "├─────────────────────────",
+    "│ 📥  *Unduh Media*",
+    "│  • `.tiktok <url>`     — Unduh video/foto TikTok",
+    "│  • `.ig <url>`         — Unduh IG (post/reel/foto)",
+    "│  • `.yt <url>`         — Unduh YouTube",
+    "├─────────────────────────",
+    "│ 🖼️  *Stiker & Teks*",
+    "│  • `.brat <teks>`      — Stiker teks gaya kiri",
+    "│  • `.bratvideo <teks>` — Video teks (butuh ffmpeg)",
+    "│  • (Kirim gambar)      — Auto jadi stiker",
+    "├─────────────────────────",
+    "│ 📌  *Pinterest*",
+    "│  • `.pin <kata kunci> [jumlah]`",
+    "│    Contoh: `.pin anime 3`",
+    "├─────────────────────────",
+    "│ 🕌  *Informasi Islam*",
+    "│  • `.quran <surah> <ayat>`",
+    "│    Contoh: `.quran Al-Fatihah 1` atau `.quran 1 1`",
+    "│  • `.jadwalsholat <kota>`",
+    "│    Contoh: `.jadwalsholat jakarta`",
+    "├─────────────────────────",
+    "│ 📚  *Info & Utilitas*",
+    "│  • `.wiki <query>`           — Ringkasan Wikipedia",
+    "│  • `.translate <kode> <teks>`— Terjemahan (id/en/dll)",
+    "│  • `.qr <teks>`              — Generate QR Code",
+    "│  • `.iplocation <ip>`        — Lokasi IP",
+    "│  • `.math <ekspresi>`        — Kalkulator",
+    "├─────────────────────────",
+    "│ 🎭  *Hiburan*",
+    "│  • `.meme`    — Meme acak",
+    "│  • `.quote`   — Kutipan",
+    "│  • `.fact`    — Fakta acak",
+    "│  • `.pantun`  — Pantun acak",
+    "├─────────────────────────",
+    "│ 💱  *Keuangan*",
+    "│  • `.currency <asal> <tujuan>`",
+    "│    Contoh: `.currency USD IDR`",
+    "│  • `.convertcurrency <asal> <tujuan> <jumlah>`",
+    "│    Contoh: `.convertcurrency USD IDR 15`",
+    "├─────────────────────────",
+    "│ 📖  *Belajar*",
+    "│  • `.anime <judul>` — Info anime",
+    "│  • `.manga <judul>` — Info manga (synopsis diterjemahkan)",
+    "│  • `.brainly <pertanyaan>` — Cari jawaban",
+    "├─────────────────────────",
+    "│ 📝  *Tips*",
+    "│  • Jika perintah lama, bot menampilkan progress bar 0–100%",
+    "│    sampai pengiriman selesai.",
+    "╰─────────────────────────"
+  ].join("\n");
+
+  await sock.sendMessage(sender, { text: menu });
 }
+
 module.exports = { sendMenu };

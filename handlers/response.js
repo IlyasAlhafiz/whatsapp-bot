@@ -5,22 +5,6 @@ function getUptime() {
   const ss = String(totalSec % 60).padStart(2, '0');
   return `${hh}:${mm}:${ss}`;
 }
-function buildMenuText() {
-  return `╭════•›「 *Menu Bot* 」
-├≽️ *.menu* / *.help*
-├ _Menampilkan list menu_
-├≽️ *.info*
-├ _Info Bot_
-├≽️ *.tiktok [url]* / *.ig [url]* / *.yt [url]*
-├ _Unduh media_
-├≽️ *.brat [teks]*
-├ _Stiker teks_
-├≽️ *.bratvideo [teks]*
-├ _Video teks_
-├≽️ *.pin <query> [jumlah]*
-├ _Gambar dari Pinterest_
-╰═══════════════`;
-}
 const STATIC_RESPONSES = [
   { keys: ['hai','halo','hi','hey'], reply: 'Halo! Ada yang bisa saya bantu? 😊' },
   { keys: ['ping'], reply: 'Pong! 🏓' },
