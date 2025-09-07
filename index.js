@@ -10,7 +10,8 @@ const commandHandler = require('./handlers/commandHandler');
 const responseHandler = require('./handlers/response');
 const { sendPinterestImages } = require('./commands/pinterest');
 const { makeBratVideo } = require('./commands/bratvideo');
-const { sendTextSticker: sendBratSticker } = require('./commands/brat'); // stiker brat teks
+const { sendTextSticker: sendBratSticker } = require('./commands/brat');
+const { downloadMsgBuffer } = require('./utils/baileysBuffer');
 
 // ===== presence helper (typing) =====
 function startTyping(sock, jid) {
@@ -262,18 +263,66 @@ async function startBot() {
   });
 }
 
+if (text.trim() === '.sticker') {
+  // kalau pesan ini ada image → pakai langsung
+  if (msg.message.imageMessage) {
+    const stop = startTyping(sock, sender);
+    const bar  = await startProgressBar(sock, sender, 'Mengonversi gambar ke stiker…');
+    try {
+      await bar.to(60, 'Resize & convert…');
+      await createStickerBaileys(sock, sender, msg);
+      await bar.stop('✅ Stiker terkirim.');
+    } catch {
+      await bar.stop('⚠️ Gagal membuat stiker.');
+    } finally { stop(); }
+  } else if (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
+    // kalau user mengetik .sticker sambil reply gambar
+    const quoted = { message: { imageMessage: msg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage } };
+    const stop = startTyping(sock, sender);
+    const bar  = await startProgressBar(sock, sender, 'Mengonversi gambar (reply) ke stiker…');
+    try {
+      await bar.to(60, 'Resize & convert…');
+      await createStickerBaileys(sock, sender, quoted);
+      await bar.stop('✅ Stiker terkirim.');
+    } catch {
+      await bar.stop('⚠️ Gagal membuat stiker.');
+    } finally { stop(); }
+  } else {
+    await sock.sendMessage(sender, { text: '📌 Kirim gambar dengan caption *.sticker* atau reply gambar lalu ketik *.sticker*' });
+  }
+  return;
+}
+
 // stiker dari gambar (biasa)
 async function createStickerBaileys(sock, sender, msg) {
-  const buffer = await sock.downloadMediaMessage(msg);
-  if (!buffer) return sock.sendMessage(sender, { text: '⚠️ Gagal unduh gambar.' });
-  const media = msg.message.imageMessage;
-  if (!media || !['image/jpeg','image/png','image/webp'].includes(media.mimetype)) {
-    return sock.sendMessage(sender, { text: 'Kirim gambar JPG/PNG/WEBP ya!' });
+  try {
+    const buffer = await downloadMsgBuffer(msg);
+    if (!buffer || !buffer.length) {
+      console.log('❌ Buffer kosong / unduh gagal.');
+      return sock.sendMessage(sender, { text: '⚠️ Gagal mengunduh gambar.' });
+    }
+
+    // cek mimetype yang “aman” tetapi jangan terlalu ketat
+    const media = msg.message.imageMessage;
+    const mime = media?.mimetype || '';
+    const allowed = ['image/jpeg','image/png','image/webp','image/heic','image/avif'];
+    if (!allowed.some(m => mime.includes(m.split('/')[1]))) {
+      // biarkan sharp coba decode — banyak file heic/avif bisa dibaca bila libvips support
+      console.log('ℹ️ Mimetype tidak lazim, tetap coba decode:', mime);
+    }
+
+    // Convert → WebP 512x512
+    const stickerBuffer = await sharp(buffer, { failOn: false })
+      .resize(512, 512, { fit: 'contain', background: { r:0, g:0, b:0, alpha:0 } })
+      .webp({ quality: 95 })
+      .toBuffer();
+
+    await sock.sendMessage(sender, { sticker: stickerBuffer });
+    console.log('✅ Stiker berhasil dibuat.');
+  } catch (e) {
+    console.error('createStickerBaileys error:', e);
+    await sock.sendMessage(sender, { text: '⚠️ Gagal membuat stiker (format tidak didukung atau file rusak).' });
   }
-  const stickerBuffer = await sharp(buffer)
-    .resize(512, 512, { fit: 'contain', background: { r:0,g:0,b:0,alpha:0 } })
-    .toFormat('webp').toBuffer();
-  await sock.sendMessage(sender, { sticker: stickerBuffer });
 }
 
 startBot();
