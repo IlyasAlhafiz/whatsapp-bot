@@ -1,0 +1,14 @@
+/node_modules/
+/**/.local-chromium/
+/.npm/
+/.pnpm-store/
+coverage/
+dist/
+build/
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.*
+.DS_Store
